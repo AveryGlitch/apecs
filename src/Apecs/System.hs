@@ -11,182 +11,203 @@ import Apecs.Types
 
 -- | Run a system with a game world
 {-# INLINE runSystem #-}
-runSystem :: System w a -> w -> IO a
+runSystem :: SystemT w m a -> w -> m a
 runSystem sys = runReaderT (unSystem sys)
 
 -- | Run a system with a game world
 {-# INLINE runWith #-}
-runWith :: w -> System w a -> IO a
+runWith :: w -> SystemT w m a -> m a
 runWith = flip runSystem
 
 -- | A slice containing all entities with component @c@
 {-# INLINE owners #-}
-owners :: forall w c. Has w c => System w (Slice c)
+owners :: forall w m c. Has w m c => SystemT w m (Slice c)
 owners = do s :: Storage c <- getStore
-            liftIO$ Slice <$> explMembers s
+            lift$ Slice <$> explMembers s
 
 -- | Returns whether the given entity has component @c@
 --   For composite components, this indicates whether the component
 --   has all its constituents
 {-# INLINE exists #-}
-exists :: forall w c. Has w c => Entity c -> System w Bool
+exists :: forall w m c. Has w m c => Entity c -> SystemT w m Bool
 exists (Entity n) = do s :: Storage c <- getStore
-                       liftIO$ explExists s n
+                       lift$ explExists s n
 
 -- | Destroys the component @c@ for the given entity
 {-# INLINE destroy #-}
-destroy :: forall w c. Has w c => Entity c -> System w ()
+destroy :: forall w m c. Has w m c => Entity c -> SystemT w m ()
 destroy (Entity n) = do s :: Storage c <- getStore
-                        liftIO$ explDestroy s n
+                        lift$ explDestroy s n
 
 -- | Removes all components. Equivalent to manually iterating and deleting, but usually optimized.
 {-# INLINE resetStore #-}
-resetStore :: forall w c p. Has w c => p c -> System w ()
+resetStore :: forall w m c p. Has w m c => p c -> SystemT w m ()
 resetStore _ = do s :: Storage c <- getStore
-                  liftIO$ explReset s
+                  lift$ explReset s
 
 -- Setting/Getting
 -- | Gets the component for a given entity.
 --   This is a safe access, because the entity might not have the requested components.
 {-# INLINE get #-}
-get :: forall w c. Has w c => Entity c -> System w (Safe c)
+get :: forall w m c. Has w m c => Entity c -> SystemT w m (Safe c)
 get (Entity ety) = do s :: Storage c <- getStore
-                      liftIO$ Safe <$> explGet s ety
+                      lift$ Safe <$> explGet s ety
 
 -- | Writes a component to a given entity. Will overwrite existing components.
 {-# INLINE set #-}
-set :: forall w c e. Has w c => Entity e -> c -> System w ()
+set :: forall w m c e. Has w m c => Entity e -> c -> SystemT w m ()
 set (Entity ety) x = do
   s :: Storage c <- getStore
-  liftIO$ explSet s ety x
+  lift$ explSet s ety x
 
 -- | Same as @set@, but uses Safe to possibly delete a component
 {-# INLINE set' #-}
-set' :: forall w c. Has w c => Entity c -> Safe c -> System w ()
+set' :: forall w m c. Has w m c => Entity c -> Safe c -> SystemT w m ()
 set' (Entity ety) (Safe c) = do
   s :: Storage c <- getStore
-  liftIO$ explSetMaybe s ety c
+  lift$ explSetMaybe s ety c
 
 -- | Applies a function if possible. Equivalent to reading, mapping, and writing, but stores can provide optimized implementations.
 {-# INLINE modify #-}
-modify :: forall w c. Has w c => Entity c -> (c -> c) -> System w ()
+modify :: forall w m c. Has w m c => Entity c -> (c -> c) -> SystemT w m ()
 modify (Entity ety) f = do
   s :: Storage c <- getStore
-  liftIO$ explModify s ety f
+  lift$ explModify s ety f
 
 {-# INLINE imapM_ #-}
 -- | Monadically iterate a system over all entities that have that component.
 --   Note that writing to the store while iterating over it is undefined behaviour.
-imapM_ :: forall w c. Has w c => (Entity c -> System w ()) -> System w ()
+imapM_ :: forall w m c. Has w m c => (Entity c -> SystemT w m ()) -> SystemT w m ()
 imapM_ sys = do s :: Storage c <- getStore
-                explImapM_ s (sys . Entity)
+                w <- System ask
+                let f = runWith w . sys . Entity
+                lift (explImapM_ s f)
+
 
 {-# INLINE imapM #-}
 -- | Monadically iterate a system over all entities that have that component.
 --   Note that writing to the store while iterating over it is undefined behaviour.
-imapM :: forall w c a. Has w c
-      => (Entity c -> System w a) -> System w [a]
+imapM :: forall w m c a. Has w m c => (Entity c -> SystemT w m a) -> SystemT w m [a]
 imapM sys = do s :: Storage c <- getStore
-               explImapM s (sys . Entity)
+               w <- System ask
+               let f = runWith w . sys . Entity
+               lift$ explImapM s f
 
 -- | Maps a pure function over all components
 {-# INLINE cmap #-}
-cmap :: forall world c. Has world c => (c -> c) -> System world ()
+cmap :: forall w m c. Has w m c => (c -> c) -> SystemT w m ()
 cmap f = do s :: Storage c <- getStore
-            liftIO$ explCmap s f
+            lift$ explCmap s f
 
 -- | 'mapM_' version of 'cmap'
 {-# INLINE cmapM_ #-}
-cmapM_ :: forall w c. Has w c => (c -> System w ()) -> System w ()
+cmapM_ :: forall w m c. Has w m c => (c -> SystemT w m ()) -> SystemT w m ()
 cmapM_ sys = do s :: Storage c <- getStore
-                explCmapM_ s sys
+                w <- System ask
+                let f = runWith w . sys
+                lift$ explCmapM_ s f
 
 -- | indexed 'cmapM_', also gives the current entity.
 {-# INLINE cimapM_ #-}
-cimapM_ :: forall w c. Has w c => ((Entity c, c) -> System w ()) -> System w ()
+cimapM_ :: forall w m c. Has w m c => ((Entity c, c) -> SystemT w m ()) -> SystemT w m ()
 cimapM_ sys = do s :: Storage c <- getStore
-                 explCimapM_ s (\(e,c) -> sys (Entity e,c))
+                 w <- System ask
+                 let f (e,c) = runWith w $ sys (Entity e,c)
+                 lift$ explCimapM_ s f
 
 -- | mapM version of cmap. Can be used to get a list of entities
 --   As the type signature implies, and unlike 'cmap', the return value is not written to the component store.
 {-# INLINE cmapM #-}
-cmapM :: forall w c a. Has w c => (c -> System w a) -> System w [a]
+cmapM :: forall w m c a. Has w m c => (c -> SystemT w m a) -> SystemT w m [a]
 cmapM sys = do s :: Storage c <- getStore
-               explCmapM s sys
+               w <- System ask
+               let f = runWith w . sys
+               lift$ explCmapM s f
 
 -- | indexed 'cmapM', also gives the current entity.
 {-# INLINE cimapM #-}
-cimapM :: forall w c a. Has w c => ((Entity c, c) -> System w a) -> System w [a]
+cimapM :: forall w m c a. Has w m c => ((Entity c, c) -> SystemT w m a) -> SystemT w m [a]
 cimapM sys = do s :: Storage c <- getStore
-                explCimapM s (\(e,c) -> sys (Entity e,c))
+                w <- System ask
+                let f (e,c) = runWith w $ sys (Entity e,c)
+                lift$ explCimapM s f
 
 -- | Maps a function that might delete its components
 {-# INLINE cmap' #-}
-cmap' :: forall world c. Has world c => (c -> Safe c) -> System world ()
+cmap' :: forall w m c. Has w m c => (c -> Safe c) -> SystemT w m ()
 cmap' f = do s :: Storage c <- getStore
-             liftIO$ do sl <- explMembers s
-                        U.forM_ sl $ \e -> do
-                          r <- explGetUnsafe s e
-                          explSetMaybe s e (getSafe . f $ r)
+             lift$ do sl <- explMembers s
+                      U.forM_ sl $ \e -> do
+                        r <- explGetUnsafe s e
+                        explSetMaybe s e (getSafe . f $ r)
 
 -- | Maps a function over all entities with a @r@, and writes their @w@
 {-# INLINE rmap #-}
-rmap :: forall world r w. (Has world w, Has world r)
-      => (r -> w) -> System world ()
-rmap f = do sr :: Storage r <- getStore
-            sc :: Storage w <- getStore
-            liftIO$ do sl <- explMembers sr
-                       U.forM_ sl $ \ e -> do
-                          r <- explGetUnsafe sr e
-                          explSet sc e (f r)
+rmap :: forall world m r w. (Has world m w, Has world m r)
+     => (r -> w) -> SystemT world m ()
+rmap f = do
+  sr :: Storage r <- getStore
+  sc :: Storage w <- getStore
+  w <- System ask
+  lift$ do
+    sl <- explMembers sr
+    U.forM_ sl $ \ e -> do
+      r <- explGetUnsafe sr e
+      explSet sc e (f r)
 
 -- | Maps a function over all entities with a @r@, and writes or deletes their @w@
 {-# INLINE rmap' #-}
-rmap' :: forall world r w. (Has world w, Has world r, Store (Storage r), Store (Storage w))
-      => (r -> Safe w) -> System world ()
-rmap' f = do sr :: Storage r <- getStore
-             sw :: Storage w <- getStore
-             liftIO$ do sl <- explMembers sr
-                        U.forM_ sl $ \ e -> do
-                           r <- explGetUnsafe sr e
-                           explSetMaybe sw e (getSafe $ f r)
+rmap' :: forall world m r w. (Has world m w, Has world m r, Store m (Storage r), Store m (Storage w))
+      => (r -> Safe w) -> SystemT world m ()
+rmap' f = do
+  sr :: Storage r <- getStore
+  sw :: Storage w <- getStore
+  lift$ do
+    sl <- explMembers sr
+    U.forM_ sl $ \ e -> do
+      r <- explGetUnsafe sr e
+      explSetMaybe sw e (getSafe $ f r)
 
 -- | For all entities with a @w@, this map reads their @r@ and writes their @w@
 {-# INLINE wmap #-}
-wmap :: forall world r w. (Has world w, Has world r, Store (Storage r), Store (Storage w))
-     => (Safe r -> w) -> System world ()
-wmap f = do sr :: Storage r <- getStore
-            sw :: Storage w <- getStore
-            liftIO$ do sl <- explMembers sr
-                       U.forM_ sl $ \ e -> do
-                         r <- explGet sr e
-                         explSet sw e (f . Safe $ r)
+wmap :: forall world m r w. (Has world m w, Has world m r, Store m (Storage r), Store m (Storage w))
+     => (Safe r -> w) -> SystemT world m ()
+wmap f = do
+  sr :: Storage r <- getStore
+  sw :: Storage w <- getStore
+  lift$ do
+    sl <- explMembers sr
+    U.forM_ sl $ \ e -> do
+      r <- explGet sr e
+      explSet sw e (f . Safe $ r)
 
 -- | For all entities with a @w@, this map reads their @r@ and writes or deletes their @w@
 {-# INLINE wmap' #-}
-wmap' :: forall world r w. (Has world w, Has world r, Store (Storage r), Store (Storage w))
-      => (Safe r -> Safe w) -> System world ()
-wmap' f = do sr :: Storage r <- getStore
-             sw :: Storage w <- getStore
-             liftIO$ do sl <- explMembers sr
-                        U.forM_ sl $ \ e -> do
-                          r <- explGet sr e
-                          explSetMaybe sw e (getSafe . f . Safe $ r)
+wmap' :: forall world m r w. (Has world m w, Has world m r, Store m (Storage r), Store m (Storage w))
+      => (Safe r -> Safe w) -> SystemT world m ()
+wmap' f = do
+  sr :: Storage r <- getStore
+  sw :: Storage w <- getStore
+  lift$ do
+    sl <- explMembers sr
+    U.forM_ sl $ \ e -> do
+      r <- explGet sr e
+      explSetMaybe sw e (getSafe . f . Safe $ r)
 
 -- | Reads a global value
 {-# INLINE readGlobal #-}
-readGlobal :: forall w c. (Has w c, GlobalStore (Storage c)) => System w c
+readGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => SystemT w m c
 readGlobal = do s :: Storage c <- getStore
-                liftIO$ explGet s 0
+                lift$ explGet s 0
 
 -- | Writes a global value
 {-# INLINE writeGlobal #-}
-writeGlobal :: forall w c. (Has w c, GlobalStore (Storage c)) => c -> System w ()
+writeGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => c -> SystemT w m ()
 writeGlobal c = do s :: Storage c <- getStore
-                   liftIO$ explSet s 0 c
+                   lift$ explSet s 0 c
 
 -- | Modifies a global value
 {-# INLINE modifyGlobal #-}
-modifyGlobal :: forall w c. (Has w c, GlobalStore (Storage c)) => (c -> c) -> System w ()
+modifyGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => (c -> c) -> SystemT w m ()
 modifyGlobal f = readGlobal >>= writeGlobal . f
 

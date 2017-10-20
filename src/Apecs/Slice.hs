@@ -6,7 +6,7 @@ module Apecs.Slice where
 
 import qualified Data.Vector.Unboxed as U
 import Data.Traversable (for)
-import Control.Monad.IO.Class
+import Control.Monad.Reader
 
 import Apecs.Types
 
@@ -63,20 +63,20 @@ forM (Slice vec) ma = traverse (ma . Entity) (U.toList vec)
 
 -- | Iterates over a slice, and reads the components of the Slice's type argument.
 {-# INLINE forMC #-}
-forMC :: forall w c a. Has w c => Slice c -> ((Entity c,Safe c) -> System w a) -> System w [a]
+forMC :: forall w m c a. Has w m c => Slice c -> ((Entity c,Safe c) -> SystemT w m a) -> SystemT w m [a]
 forMC (Slice vec) sys = do
   s :: Storage c <- getStore
   for (U.toList vec) $ \e -> do
-    r <- liftIO$ explGet s e
+    r <- lift$ explGet s e
     sys (Entity e, Safe r)
 
 -- | Iterates over a slice, and reads the components of the Slice's type argument.
 {-# INLINE forMC_ #-}
-forMC_ :: forall w c a. Has w c => Slice c -> ((Entity c,Safe c) -> System w a) -> System w ()
+forMC_ :: forall w m c a. Has w m c => Slice c -> ((Entity c,Safe c) -> SystemT w m a) -> SystemT w m ()
 forMC_ (Slice vec) sys = do
   s :: Storage c <- getStore
   U.forM_ vec $ \e -> do
-    r <- liftIO$ explGet s e
+    r <- lift$ explGet s e
     sys (Entity e, Safe r)
 
 -- | Slice version of mapM_
@@ -91,16 +91,16 @@ mapM ma (Slice vec) = traverse (ma . Entity) (U.toList vec)
 
 -- | Iterates over a slice, and reads the components of the Slice's type argument.
 {-# INLINE mapMC #-}
-mapMC :: forall w c a. Has w c => ((Entity c,Safe c) -> System w a) -> Slice c -> System w [a]
+mapMC :: forall w m c a. Has w m c => ((Entity c,Safe c) -> SystemT w m a) -> Slice c -> SystemT w m [a]
 mapMC sys (Slice vec) = do
   s :: Storage c <- getStore
   for (U.toList vec) $ \e -> do
-    r <- liftIO$ explGet s e
+    r <- lift$ explGet s e
     sys (Entity e, Safe r)
 
 -- | Iterates over a slice, and reads the components of the Slice's type argument.
 {-# INLINE mapMC_ #-}
-mapMC_ :: forall w c a. Has w c => ((Entity c, Safe c) -> System w a) -> Slice c -> System w ()
+mapMC_ :: forall w m c a. Has w m c => ((Entity c, Safe c) -> SystemT w m a) -> Slice c -> SystemT w m ()
 mapMC_ sys vec = forMC_ vec sys
 
 toList :: Slice a -> [Entity a]

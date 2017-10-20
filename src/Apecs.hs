@@ -4,7 +4,7 @@ It selectively re-exports the user-facing functions from the submodules.
 -}
 module Apecs (
   -- * Types
-    System(..),
+    System, SystemT(..),
     Component(..), Entity(..), Slice, Has(..), Safe(..), cast,
     Map, Set, Unique, Global, Flag(..),
 

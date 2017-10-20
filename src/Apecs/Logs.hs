@@ -29,11 +29,11 @@ class PureLog l c where
   pureOnDestroy :: Entity a -> c -> l c -> l c
 
 -- | A Log is a PureLog with mutable state.
-class Log l c where
-  logEmpty     :: IO (l c)
-  logOnSet     :: l c -> Entity a -> Maybe c -> c -> IO ()
-  logOnDestroy :: l c -> Entity a -> c -> IO ()
-  logReset     :: l c -> IO ()
+class Monad m => Log l m c where
+  logEmpty     :: m (l c)
+  logOnSet     :: l c -> Entity a -> Maybe c -> c -> m ()
+  logOnDestroy :: l c -> Entity a -> c -> m ()
+  logReset     :: l c -> m ()
 
 class HasLog s l where
   explGetLog :: s -> l (Stores s)
@@ -44,27 +44,27 @@ instance HasLog (Logger l s) l where
 
 -- | Produces the log indicated by the return type.
 {-# INLINE getLog #-}
-getLog :: forall w c l. (Store (Storage c), Has w c, HasLog (Storage c) l, Log l c) => System w (l c)
+getLog :: forall w m c l. (Has w m c, HasLog (Storage c) l, Log l m c) => SystemT w m (l c)
 getLog = do s :: Storage c <- getStore
             return (explGetLog s)
 
 
 -- | FromPure turns a PureLog into a Log
 newtype FromPure l c = FromPure (IORef (l c))
-instance PureLog l c => Log (FromPure l) c where
+instance (MonadIO m, PureLog l c) => Log (FromPure l) m c where
   {-# INLINE logEmpty #-}
-  logEmpty = FromPure <$> newIORef pureEmpty
+  logEmpty = liftIO$ FromPure <$> newIORef pureEmpty
   {-# INLINE logOnSet #-}
-  logOnSet (FromPure lref) e old new = modifyIORef' lref (pureOnSet e old new)
+  logOnSet (FromPure lref) e old new = liftIO$ modifyIORef' lref (pureOnSet e old new)
   {-# INLINE logOnDestroy #-}
-  logOnDestroy (FromPure lref) e c = modifyIORef' lref (pureOnDestroy e c)
+  logOnDestroy (FromPure lref) e c = liftIO$ modifyIORef' lref (pureOnDestroy e c)
   {-# INLINE logReset #-}
-  logReset (FromPure lref) = writeIORef lref pureEmpty
+  logReset (FromPure lref) = liftIO$ writeIORef lref pureEmpty
 
 -- | A @Logger l@ of some store updates its @Log l@ with the writes and deletes to store @s@
 data Logger l s = Logger (l (Stores s)) s
 
-instance (Log l (Stores s), Cachable s) => Store (Logger l s) where
+instance (Log l m (Stores s), Store m s, Cachable s, MonadIO m) => Store m (Logger l s) where
   type Stores (Logger l s) = Stores s
   initStore = Logger <$> logEmpty <*> initStore
 
@@ -76,13 +76,17 @@ instance (Log l (Stores s), Cachable s) => Store (Logger l s) where
       _ -> return ()
 
   {-# INLINE explExists #-}
-  explExists (Logger _ s) ety = explExists s ety
+  explExists (Logger _ s) = explExists s
+
   {-# INLINE explMembers #-}
   explMembers (Logger _ s) = explMembers s
+
   {-# INLINE explReset #-}
   explReset (Logger l s) = logReset l >> explReset s
+
   {-# INLINE explImapM_ #-}
-  explImapM_ (Logger _ s) = explImapM_ s
+  explImapM_ (Logger _ s) sys = explImapM_ s sys
+
   {-# INLINE explImapM #-}
   explImapM (Logger _ s) = explImapM s
 
@@ -120,7 +124,7 @@ instance (Log l (Stores s), Cachable s) => Store (Logger l s) where
 
 -- | Composite Log consisting of 1 Log
 newtype LVec1 l c = LVec1 (l c)
-instance Log l c => Log (LVec1 l) c where
+instance Log l m c => Log (LVec1 l) m c where
   {-# INLINE logEmpty #-}
   logEmpty = LVec1 <$> logEmpty
   {-# INLINE logOnSet #-}
@@ -132,7 +136,7 @@ instance Log l c => Log (LVec1 l) c where
 
 -- | Composite Log consisting of 2 Logs
 data LVec2 l1 l2 c = LVec2 (l1 c) (l2 c)
-instance (Log l1 c, Log l2 c) => Log (LVec2 l1 l2) c where
+instance (Log l1 m c, Log l2 m c) => Log (LVec2 l1 l2) m c where
   {-# INLINE logEmpty #-}
   logEmpty = LVec2 <$> logEmpty <*> logEmpty
   {-# INLINE logOnSet #-}
@@ -144,7 +148,7 @@ instance (Log l1 c, Log l2 c) => Log (LVec2 l1 l2) c where
 
 -- | Composite Log consisting of 3 Logs
 data LVec3 l1 l2 l3 c = LVec3 (l1 c) (l2 c) (l3 c)
-instance (Log l1 c, Log l2 c, Log l3 c) => Log (LVec3 l1 l2 l3) c where
+instance (Log l1 m c, Log l2 m c, Log l3 m c) => Log (LVec3 l1 l2 l3) m c where
   {-# INLINE logEmpty #-}
   logEmpty = LVec3 <$> logEmpty <*> logEmpty <*> logEmpty
   {-# INLINE logOnSet #-}
@@ -165,9 +169,9 @@ instance (Log l1 c, Log l2 c, Log l3 c) => Log (LVec3 l1 l2 l3) c where
 
 -- | Hashtable that maintains buckets of entities whose @fromEnum c@ produces the same value
 newtype EnumTable c = EnumTable (VM.IOVector S.IntSet)
-instance (Bounded c, Enum c) => Log EnumTable c where
+instance (Bounded c, Enum c, MonadIO m) => Log EnumTable m c where
   {-# INLINE logEmpty #-}
-  logEmpty = do
+  logEmpty = liftIO$ do
     let lo = fromEnum (minBound :: c)
         hi = fromEnum (maxBound :: c)
 
@@ -176,17 +180,17 @@ instance (Bounded c, Enum c) => Log EnumTable c where
        else error "Attempted to initialize EnumTable for a component with a non-zero minBound"
 
   {-# INLINE logOnSet #-}
-  logOnSet (EnumTable vec) (Entity e) old new = do
+  logOnSet (EnumTable vec) (Entity e) old new = liftIO$ do
     case old of
       Nothing -> return ()
       Just c -> VM.modify vec (S.delete e) (fromEnum c)
     VM.modify vec (S.insert e) (fromEnum new)
 
   {-# INLINE logOnDestroy #-}
-  logOnDestroy (EnumTable vec) (Entity e) c = VM.modify vec (S.delete e) (fromEnum c)
+  logOnDestroy (EnumTable vec) (Entity e) c = liftIO$ VM.modify vec (S.delete e) (fromEnum c)
 
   {-# INLINE logReset #-}
-  logReset (EnumTable vec) = forM_ [0..VM.length vec - 1] (\e -> VM.write vec e mempty)
+  logReset (EnumTable vec) = liftIO$ forM_ [0..VM.length vec - 1] (\e -> VM.write vec e mempty)
 
 -- | Query the @EnumTable@ by an index (the result of @fromEnum@).
 --   Will return an empty slice if @index < 0@ of @index >= fromEnum (maxBound)@.

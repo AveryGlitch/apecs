@@ -39,15 +39,15 @@ instance Component EntityCounter where
 
 -- | Bumps the EntityCounter and yields its value
 {-# INLINE nextEntity #-}
-nextEntity :: Has w EntityCounter => System w (Entity ())
+nextEntity :: Has w m EntityCounter => SystemT w m (Entity ())
 nextEntity = do n <- readGlobal
                 writeGlobal (n+1)
                 return (Entity . getSum . getCounter $ n)
 
 -- | Writes the given components to a new entity, and yields that entity
 {-# INLINE newEntity #-}
-newEntity :: (Store (Storage c), Has w c, Has w EntityCounter)
-          => c -> System w (Entity c)
+newEntity :: (Has w m c, Has w m EntityCounter)
+          => c -> SystemT w m (Entity c)
 newEntity c = do ety <- nextEntity
                  set ety c
                  return (cast ety)
@@ -57,15 +57,15 @@ runGC :: System w ()
 runGC = liftIO performMajorGC
 
 -- | imapM return
-listAllE :: Has w c => System w [Entity c]
+listAllE :: Has w m c => SystemT w m [Entity c]
 listAllE = imapM return
 
 -- | cmapM return
-listAllC :: Has w c => System w [c]
+listAllC :: Has w m c => SystemT w m [c]
 listAllC = cmapM return
 
 -- | cimapM return
-listAllEC :: Has w c => System w [(Entity c, c)]
+listAllEC :: Has w m c => SystemT w m [(Entity c, c)]
 listAllEC = cimapM return
 
 -- $hash

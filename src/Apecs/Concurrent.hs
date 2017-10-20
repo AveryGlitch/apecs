@@ -3,7 +3,7 @@
 
 module Apecs.Concurrent (
   concurrently,
-  pcmap, prmap, pwmap, pcmap', prmap', pwmap',
+  {-pcmap, prmap, pwmap, pcmap', prmap', pwmap',-}
 ) where
 
 import qualified Control.Concurrent.Async as A
@@ -30,10 +30,11 @@ parallelize grainSize sys vec
         | U.null vec = []
         | otherwise = let (h,t) = U.splitAt grainSize vec in h : go t
 
+{--
 -- | Executes a map in parallel by requesting a slice of all components,
 --   and spawning threads iterating over @grainSize@ components each.
 {-# INLINE pcmap #-}
-pcmap :: forall world c. Has world c => Int -> (c -> c) -> System world ()
+pcmap :: forall world m c. (Store IO (Storage c), MonadIO m, Has world m c) => Int -> (c -> c) -> SystemT world m ()
 pcmap grainSize f = do
   s :: Storage c <- getStore
   liftIO$ do
@@ -42,8 +43,8 @@ pcmap grainSize f = do
 
 -- | @rmap@ version of @pcmap@
 {-# INLINE prmap #-}
-prmap :: forall world r w. (Has world w, Has world r)
-      => Int -> (r -> w) -> System world ()
+prmap :: forall world m r w. (Has world m w, Has world m r)
+      => Int -> (r -> w) -> SystemT world m ()
 prmap grainSize f =
   do sr :: Storage r <- getStore
      sw :: Storage w <- getStore
@@ -53,7 +54,7 @@ prmap grainSize f =
 
 -- | @cmap'@ version of @pcmap@
 {-# INLINE pcmap' #-}
-pcmap' :: forall world c. Has world c => Int -> (c -> Safe c) -> System world ()
+pcmap' :: forall world m c. (MonadIO m, Has world m c) => Int -> (c -> Safe c) -> SystemT world m ()
 pcmap' grainSize f = do
   s :: Storage c <- getStore
   liftIO$ do sl <- explMembers s
@@ -61,8 +62,8 @@ pcmap' grainSize f = do
 
 -- | @rmap'@ version of @pcmap@
 {-# INLINE prmap' #-}
-prmap' :: forall world r w. (Has world w, Has world r, Store (Storage r), Store (Storage w))
-      => Int -> (r -> Safe w) -> System world ()
+prmap' :: forall world m r w. (MonadIO m, Has world m w, Has world m r)
+       => Int -> (r -> Safe w) -> SystemT world m ()
 prmap' grainSize f = do
   sr :: Storage r <- getStore
   sw :: Storage w <- getStore
@@ -71,8 +72,8 @@ prmap' grainSize f = do
 
 -- | @wmap@ version of @pcmap@
 {-# INLINE pwmap #-}
-pwmap :: forall world r w. (Has world w, Has world r, Store (Storage r), Store (Storage w))
-     => Int -> (Safe r -> w) -> System world ()
+pwmap :: forall world m r w. (Has world m w, Has world m r)
+      => Int -> (Safe r -> w) -> SystemT world m ()
 pwmap grainSize f = do
   sr :: Storage r <- getStore
   sw :: Storage w <- getStore
@@ -81,10 +82,11 @@ pwmap grainSize f = do
 
 -- | @wmap'@ version of @pcmap@
 {-# INLINE pwmap' #-}
-pwmap' :: forall world r w. (Has world w, Has world r, Store (Storage r), Store (Storage w))
-       => Int -> (Safe r -> Safe w) -> System world ()
+pwmap' :: forall world m r w. (Has world m w, Has world m r)
+       => Int -> (Safe r -> Safe w) -> SystemT world m ()
 pwmap' grainSize f =
   do sr :: Storage r <- getStore
      sw :: Storage w <- getStore
      liftIO$ do sl <- explMembers sr
                 parallelize grainSize (\e -> explGet sr e >>= explSetMaybe sw e . getSafe . f . Safe) sl
+--}

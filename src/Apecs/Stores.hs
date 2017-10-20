@@ -26,35 +26,35 @@ import Data.Proxy
 import Apecs.Types
 
 {-# INLINE defaultSetMaybe #-}
-defaultSetMaybe :: (Store s, SafeRW s ~ Maybe (Stores s)) => s -> Int -> Maybe (Stores s) -> IO ()
+defaultSetMaybe :: (Store m s, SafeRW s ~ Maybe (Stores s)) => s -> Int -> Maybe (Stores s) -> m ()
 defaultSetMaybe s e Nothing  = explDestroy s e
 defaultSetMaybe s e (Just c) = explSet s e c
 
 -- | A map from Data.Intmap.Strict. O(log(n)) for most operations.
 --   Yields safe runtime representations of type @Maybe c@.
 newtype Map c = Map (IORef (M.IntMap c))
-instance Store (Map c) where
+instance MonadIO m => Store m (Map c) where
   type Stores (Map c) = c
-  initStore = Map <$> newIORef mempty
-  explDestroy (Map ref) ety = modifyIORef' ref (M.delete ety)
-  explMembers (Map ref)     = U.fromList . M.keys <$> readIORef ref
-  explExists  (Map ref) ety = M.member ety <$> readIORef ref
-  explReset   (Map ref)     = writeIORef ref mempty
-  {-# INLINE explDestroy #-}
-  {-# INLINE explMembers #-}
-  {-# INLINE explExists #-}
-  {-# INLINE explReset #-}
   type SafeRW (Map c) = Maybe c
-  explGetUnsafe (Map ref) ety = fromJust . M.lookup ety <$> readIORef ref
-  explGet       (Map ref) ety = M.lookup ety <$> readIORef ref
-  explSet       (Map ref) ety x = modifyIORef' ref $ M.insert ety x
+  initStore = liftIO$ Map <$> newIORef mempty
+  explDestroy (Map ref) ety = liftIO$ modifyIORef' ref (M.delete ety)
+  explMembers (Map ref)     = liftIO$ U.fromList . M.keys <$> readIORef ref
+  explExists  (Map ref) ety = liftIO$ M.member ety <$> readIORef ref
+  explReset   (Map ref)     = liftIO$ writeIORef ref mempty
+  explGetUnsafe (Map ref) ety = liftIO$ fromJust . M.lookup ety <$> readIORef ref
+  explGet       (Map ref) ety = liftIO$ M.lookup ety <$> readIORef ref
+  explSet       (Map ref) ety x = liftIO$ modifyIORef' ref $ M.insert ety x
   explSetMaybe = defaultSetMaybe
-  explModify    (Map ref) ety f = modifyIORef' ref $ M.adjust f ety
-  explCmap      (Map ref) f = modifyIORef' ref $ M.map f
+  explModify    (Map ref) ety f = liftIO$ modifyIORef' ref $ M.adjust f ety
+  explCmap      (Map ref) f = liftIO$ modifyIORef' ref $ M.map f
   explCmapM_    (Map ref) ma = liftIO (readIORef ref) >>= mapM_ ma
   explCmapM     (Map ref) ma = liftIO (readIORef ref) >>= mapM  ma . M.elems
   explCimapM_   (Map ref) ma = liftIO (readIORef ref) >>= mapM_ ma . M.assocs
   explCimapM    (Map ref) ma = liftIO (readIORef ref) >>= mapM  ma . M.assocs
+  {-# INLINE explDestroy #-}
+  {-# INLINE explMembers #-}
+  {-# INLINE explExists #-}
+  {-# INLINE explReset #-}
   {-# INLINE explGetUnsafe #-}
   {-# INLINE explGet #-}
   {-# INLINE explSet #-}
@@ -73,7 +73,7 @@ class Flag c where
 -- | A store that keeps membership, but holds no values.
 --   Produces @flag@ runtime values.
 newtype Set c = Set (IORef S.IntSet)
-instance Flag c => Store (Set c) where
+instance Flag c => Store IO (Set c) where
   type Stores (Set c) = c
   type SafeRW (Set c) = Bool
   initStore = Set <$> newIORef mempty
@@ -111,7 +111,7 @@ instance Flag c => Store (Set c) where
 -- | A Unique contains at most one component.
 --   Writing to it overwrites both the previous component and its owner.
 data Unique c = Unique (IORef Int) (IORef c)
-instance Store (Unique c) where
+instance Store IO (Unique c) where
   type Stores (Unique c) = c
   type SafeRW (Unique c) = Maybe c
   initStore = Unique <$> newIORef (-1) <*> newIORef undefined
@@ -173,7 +173,7 @@ instance Store (Unique c) where
 -- | Constant value. Not very practical, but fun to write.
 --   Contains `mempty`
 newtype Const c = Const c
-instance Monoid c => Store (Const c) where
+instance (Monad m, Monoid c) => Store m (Const c) where
   type Stores (Const c) = c
   initStore = return$ Const mempty
   explDestroy _ _ = return ()
@@ -187,13 +187,13 @@ instance Monoid c => Store (Const c) where
   explSetMaybe  _ _ _ = return ()
   explModify    _ _ _ = return ()
   explCmap       _ _ = return ()
-instance Monoid c => GlobalStore (Const c) where
+instance (Monoid c) => GlobalStore (Const c) where
 
 -- | Global value.
 --   Initialized with 'mempty'
 newtype Global c = Global (IORef c)
-instance Monoid c => GlobalStore (Global c) where
-instance Monoid c => Store (Global c) where
+instance Monoid c => GlobalStore (Global c)
+instance Monoid c => Store IO (Global c) where
   type Stores   (Global c) = c
   initStore = Global <$> newIORef mempty
 
@@ -213,11 +213,11 @@ instance Monoid c => Store (Global c) where
 data Cache (n :: Nat) s =
   Cache Int (UM.IOVector Int) (VM.IOVector (Stores s)) s
 
-class (Store s, SafeRW s ~ Maybe (Stores s)) => Cachable s
+class (Store IO s, SafeRW s ~ Maybe (Stores s)) => Cachable s
 instance Cachable (Map s)
 instance (KnownNat n, Cachable s) => Cachable (Cache n s)
 
-instance (KnownNat n, Cachable s) => Store (Cache n s) where
+instance (KnownNat n, Cachable s) => Store IO (Cache n s) where
   type Stores (Cache n s) = Stores s
   initStore = do
     let n = fromIntegral$ natVal (Proxy @n)

@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Apecs.Types where
 
@@ -11,7 +12,7 @@ import Control.Monad.Reader
 import Data.Traversable (for)
 import qualified Data.Vector.Unboxed as U
 
-import qualified Apecs.THTuples as T
+{-import qualified Apecs.THTuples as T-}
 
 -- | An Entity is really just an Int. The type variable is used to keep track of reads and writes, but can be freely cast.
 newtype Entity c = Entity {unEntity :: Int} deriving (Eq, Ord, Show)
@@ -20,114 +21,115 @@ newtype Entity c = Entity {unEntity :: Int} deriving (Eq, Ord, Show)
 newtype Slice c = Slice {unSlice :: U.Vector Int} deriving (Show, Monoid)
 
 -- | A system is a newtype around `ReaderT w IO a`, where `w` is the game world variable.
-newtype System w a = System {unSystem :: ReaderT w IO a} deriving (Functor, Monad, Applicative, MonadIO)
+newtype SystemT w m a = System {unSystem :: ReaderT w m a} deriving (Functor, Monad, Applicative, MonadTrans, MonadIO)
+type System w a = SystemT w IO a
 
 -- | A component is defined by the type of its storage
 --   The storage in turn supplies runtime types for the component.
 --   For the component to be valid, its Storage must be in instance of Store.
-class (Stores (Storage c) ~ c, Store (Storage c)) => Component c where
+class (Stores (Storage c) ~ c) => Component c where
   type Storage c
 
 -- | A world `Has` a component if it can produce its Storage
-class Component c => Has w c where
-  getStore :: System w (Storage c)
+class (Store m (Storage c), Component c) => Has w m c where
+  getStore :: Monad m => SystemT w m (Storage c)
 
 -- | Represents a safe access to @c@. A safe access is either a read that might fail, or a write that might delete.
 newtype Safe c = Safe {getSafe :: SafeRW (Storage c)}
 
 -- | Holds components indexed by entities
-class Store s where
+class Monad m => Store m s where
   -- | The type of components stored by this Store
   type Stores s
   -- | Return type for safe reads writes to the store
   type SafeRW s
 
   -- Initialize the store with its initialization arguments.
-  initStore :: IO s
+  initStore :: m s
 
   -- | Retrieves a component from the store
-  explGet :: s -> Int -> IO (SafeRW s)
+  explGet :: s -> Int -> m (SafeRW s)
   -- | Writes a component
-  explSet :: s -> Int -> Stores s -> IO ()
+  explSet :: s -> Int -> Stores s -> m ()
   -- | Destroys the component for the given index.
-  explDestroy :: s -> Int -> IO ()
+  explDestroy :: s -> Int -> m ()
   -- | Returns whether there is a component for the given index
-  explExists :: s -> Int -> IO Bool
+  explExists :: s -> Int -> m Bool
   explExists s n = do
     mems <- explMembers s
     return $ U.elem n mems
 
   -- | Returns an unboxed vector of member indices
-  explMembers :: s -> IO (U.Vector Int)
+  explMembers :: s -> m (U.Vector Int)
 
   -- | Unsafe index to the store. What happens if the component does not exist is left undefined.
-  explGetUnsafe :: s -> Int -> IO (Stores s)
+  explGetUnsafe :: s -> Int -> m (Stores s)
   -- | Either writes or deletes a component
-  explSetMaybe :: s -> Int -> SafeRW s -> IO ()
+  explSetMaybe :: s -> Int -> SafeRW s -> m ()
 
   -- | Removes all components.
   --   Equivalent to calling @explDestroy@ on each member
   {-# INLINE explReset #-}
-  explReset :: s -> IO ()
+  explReset :: s -> m ()
   explReset s = do
     sl <- explMembers s
     U.mapM_ (explDestroy s) sl
 
   -- | Monadically iterates over member indices
-  explImapM_ :: MonadIO m => s -> (Int -> m a) -> m ()
+  explImapM_ :: s -> (Int -> m a) -> m ()
   {-# INLINE explImapM_ #-}
-  explImapM_ s ma = liftIO (explMembers s) >>= mapM_ ma . U.toList
+  explImapM_ s ma = explMembers s >>= mapM_ ma . U.toList
 
   -- | Monadically iterates over member indices
-  explImapM :: MonadIO m => s -> (Int -> m a) -> m [a]
+  explImapM :: s -> (Int -> m a) -> m [a]
   {-# INLINE explImapM #-}
-  explImapM s ma = liftIO (explMembers s) >>= mapM ma . U.toList
+  explImapM s ma = explMembers s >>= mapM ma . U.toList
 
   -- | Modifies an element in the store.
   --   Equivalent to reading a value, and then writing the result of the function application.
   {-# INLINE explModify #-}
-  explModify :: s -> Int -> (Stores s -> Stores s) -> IO ()
+  explModify :: s -> Int -> (Stores s -> Stores s) -> m ()
   explModify s ety f = do etyExists <- explExists s ety
                           when etyExists $ explGetUnsafe s ety >>= explSet s ety . f
 
   -- | Maps over all elements of this store.
   --   Equivalent to getting a list of all entities with this component, and then explModifying each of them.
-  explCmap :: s -> (Stores s -> Stores s) -> IO ()
+  explCmap :: s -> (Stores s -> Stores s) -> m ()
   {-# INLINE explCmap #-}
   explCmap s f = explMembers s >>= U.mapM_ (\ety -> explModify s ety f)
 
-  explCmapM_ :: MonadIO m => s -> (Stores s -> m a) -> m ()
+  explCmapM_ :: s -> (Stores s -> m a) -> m ()
   {-# INLINE explCmapM_ #-}
   explCmapM_ s sys = do
-    sl <- liftIO$ explMembers s
-    U.forM_ sl $ \ety -> do x :: Stores s <- liftIO$ explGetUnsafe s ety
+    sl <- explMembers s
+    U.forM_ sl $ \ety -> do x :: Stores s <- explGetUnsafe s ety
                             sys x
 
-  explCimapM_ :: MonadIO m => s -> ((Int, Stores s) -> m a) -> m ()
+  explCimapM_ :: s -> ((Int, Stores s) -> m a) -> m ()
   {-# INLINE explCimapM_ #-}
   explCimapM_ s sys = do
-    sl <- liftIO$ explMembers s
-    U.forM_ sl $ \ety -> do x :: Stores s <- liftIO$ explGetUnsafe s ety
+    sl <- explMembers s
+    U.forM_ sl $ \ety -> do x :: Stores s <- explGetUnsafe s ety
                             sys (ety,x)
 
-  explCmapM  :: MonadIO m => s -> (Stores s -> m a) -> m [a]
+  explCmapM  :: s -> (Stores s -> m a) -> m [a]
   {-# INLINE explCmapM #-}
   explCmapM s sys = do
-    sl <- liftIO$ explMembers s
+    sl <- explMembers s
     for (U.toList sl) $ \ety -> do
-      x :: Stores s <- liftIO$ explGetUnsafe s ety
+      x :: Stores s <- explGetUnsafe s ety
       sys x
 
-  explCimapM :: MonadIO m => s -> ((Int, Stores s) -> m a) -> m [a]
+  explCimapM :: s -> ((Int, Stores s) -> m a) -> m [a]
   {-# INLINE explCimapM #-}
   explCimapM s sys = do
-    sl <- liftIO$ explMembers s
+    sl <- explMembers s
     for (U.toList sl) $ \ety -> do
-      x :: Stores s <- liftIO$ explGetUnsafe s ety
+      x :: Stores s <- explGetUnsafe s ety
       sys (ety,x)
 
--- | Class of storages for global values
-class (SafeRW s ~ Stores s, Store s) => GlobalStore s where
+-- | Class of storages for global values, @get undefined@ is expected to be safe.
+class (SafeRW s ~ Stores s) => GlobalStore s where
 
 -- | Casts for entities and slices
 class Cast a b where
@@ -140,7 +142,36 @@ instance Cast (Slice a) (Slice b) where
   cast (Slice vec) = Slice vec
 
 -- Tuple Instances
-T.makeInstances [2..6]
+{-T.makeInstances [2..6]-}
+instance (Component a, Component b) => Component (a,b) where
+  type Storage (a,b) = (Storage a, Storage b)
+
+instance (Has w m a, Has w m b) => Has w m (a,b) where
+  {-# INLINE getStore #-}
+  getStore = (,) <$> getStore <*> getStore
+
+instance (Store m a, Store m b) => Store m (a,b) where
+  type Stores (a, b) = (Stores a, Stores b)
+  type SafeRW (a, b) = (SafeRW a, SafeRW b)
+  initStore = (,) <$> initStore <*> initStore
+
+  explGet       (sa,sb) ety = (,) <$> explGet sa ety <*> explGet sb ety
+  explSet       (sa,sb) ety (wa,wb) = explSet sa ety wa >> explSet sb ety wb
+  explReset     (sa,sb) = explReset sa >> explReset sb
+  explDestroy   (sa,sb) ety = explDestroy sa ety >> explDestroy sb ety
+  explExists    (sa,sb) ety = explExists sa ety >>= \case False -> return False
+                                                          True  -> explExists sb ety
+  explMembers   (sa,sb) = explMembers sa >>= U.filterM (explExists sb)
+  explGetUnsafe (sa,sb) ety = (,) <$> explGetUnsafe sa ety <*> explGetUnsafe sb ety
+  explSetMaybe  (sa,sb) ety (wa,wb) = explSetMaybe sa ety wa >> explSetMaybe sb ety wb
+  {-# INLINE explGetUnsafe #-}
+  {-# INLINE explGet #-}
+  {-# INLINE explSet #-}
+  {-# INLINE explSetMaybe #-}
+  {-# INLINE explMembers #-}
+  {-# INLINE explReset #-}
+  {-# INLINE explDestroy #-}
+  {-# INLINE explExists #-}
 
 instance (GlobalStore a, GlobalStore b) => GlobalStore (a,b) where
-instance (GlobalStore a, GlobalStore b, GlobalStore c) => GlobalStore (a,b,c) where
+{-instance (GlobalStore a, GlobalStore b, GlobalStore c) => GlobalStore (a,b,c) where-}
