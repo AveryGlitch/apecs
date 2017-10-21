@@ -17,15 +17,16 @@ makeWorldNoEC worldName cTypes = do
   cTypesNames <- mapM (\t -> do rec <- genName "rec"; return (ConT t, rec)) cTypes
 
   let wld = mkName worldName
-      has = mkName "Has"
+      hasT = ConT$ mkName "Has"
       sys = mkName "System"
+      ioT  = ConT$ mkName "IO"
       wldDecl = DataD [] wld [] Nothing [RecC wld records] []
 
       makeRecord (t,n) = (n, Bang NoSourceUnpackedness SourceStrict, ConT (mkName "Storage") `AppT` t)
       records = makeRecord <$> cTypesNames
 
       makeInstance (t,n) =
-        InstanceD Nothing [] ((ConT has `AppT` ConT wld) `AppT` t)
+        InstanceD Nothing [] (hasT `AppT` ConT wld `AppT` ioT `AppT` t)
           [ FunD (mkName "getStore") [Clause []
               (NormalB$ ConE sys `AppE` (VarE (mkName "asks") `AppE` VarE n))
             [] ]

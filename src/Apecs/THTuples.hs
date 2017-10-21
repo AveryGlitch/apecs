@@ -69,8 +69,7 @@ tupleInstances n = do
           TySynEqn [varTuple] (tupleUpT . fmap strgT $ vars)
         ]
 
-      monadN = mkName "m"
-      monadT = VarT monadN
+      monadT = VarT (mkName "m")
 
       hasN = mkName "Has"
       hasT var = ConT hasN `AppT` VarT (mkName "w") `AppT` monadT `AppT` var

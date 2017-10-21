@@ -39,13 +39,13 @@ type Deletes a = [RandomEntity a]
 type Writes a  = [(RandomEntity a, a)]
 type Scramble a = (Inserts a, Writes a, Deletes a)
 
-insertAll :: (Has w EntityCounter, Has w c) => Inserts c -> System w ()
+insertAll :: (Has w IO EntityCounter, Has w IO c) => Inserts c -> System w ()
 insertAll = mapM_ newEntity
-writeAll  :: Has w c => Writes c -> System w ()
+writeAll  :: Has w IO c => Writes c -> System w ()
 writeAll = mapM_ $ \(e, w) -> set (getRandom e) w
-deleteAll :: Has w c => Deletes c -> System w ()
+deleteAll :: Has w IO c => Deletes c -> System w ()
 deleteAll = mapM_ (destroy . getRandom)
-scramble :: (Has w EntityCounter, Has w c) => Scramble c -> System w ()
+scramble :: (Has w IO EntityCounter, Has w IO c) => Scramble c -> System w ()
 scramble (is, ws, ds) = insertAll is >> writeAll ws >> deleteAll ds
 
 -- Tests whether writing and reading gives back the original component
