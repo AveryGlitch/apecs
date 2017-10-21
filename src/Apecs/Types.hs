@@ -53,6 +53,7 @@ class Monad m => Store m s where
   -- | Destroys the component for the given index.
   explDestroy :: s -> Int -> m ()
   -- | Returns whether there is a component for the given index
+  {-# INLINE explExists #-}
   explExists :: s -> Int -> m Bool
   explExists s n = do
     mems <- explMembers s

@@ -33,7 +33,7 @@ makeWorldNoEC worldName cTypes = do
           ]
 
       initWorldName = mkName $ "init" ++ worldName
-      initSig = SigD initWorldName (AppT (ConT (mkName "IO")) (ConT wld))
+      initSig = SigD initWorldName (ioT `AppT` (ConT wld))
       initDecl = FunD initWorldName [Clause []
         (NormalB$ iterate (\wE -> AppE (AppE (VarE $ mkName "<*>") wE) (VarE $ mkName "initStore")) (AppE (VarE $ mkName "return") (ConE wld)) !! length records)
         [] ]
