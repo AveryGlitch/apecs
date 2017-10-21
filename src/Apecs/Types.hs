@@ -11,8 +11,7 @@ module Apecs.Types where
 import Control.Monad.Reader
 import Data.Traversable (for)
 import qualified Data.Vector.Unboxed as U
-
-{-import qualified Apecs.THTuples as T-}
+import qualified Apecs.THTuples as T
 
 -- | An Entity is really just an Int. The type variable is used to keep track of reads and writes, but can be freely cast.
 newtype Entity c = Entity {unEntity :: Int} deriving (Eq, Ord, Show)
@@ -142,36 +141,6 @@ instance Cast (Slice a) (Slice b) where
   cast (Slice vec) = Slice vec
 
 -- Tuple Instances
-{-T.makeInstances [2..6]-}
-instance (Component a, Component b) => Component (a,b) where
-  type Storage (a,b) = (Storage a, Storage b)
-
-instance (Has w m a, Has w m b) => Has w m (a,b) where
-  {-# INLINE getStore #-}
-  getStore = (,) <$> getStore <*> getStore
-
-instance (Store m a, Store m b) => Store m (a,b) where
-  type Stores (a, b) = (Stores a, Stores b)
-  type SafeRW (a, b) = (SafeRW a, SafeRW b)
-  initStore = (,) <$> initStore <*> initStore
-
-  explGet       (sa,sb) ety = (,) <$> explGet sa ety <*> explGet sb ety
-  explSet       (sa,sb) ety (wa,wb) = explSet sa ety wa >> explSet sb ety wb
-  explReset     (sa,sb) = explReset sa >> explReset sb
-  explDestroy   (sa,sb) ety = explDestroy sa ety >> explDestroy sb ety
-  explExists    (sa,sb) ety = explExists sa ety >>= \case False -> return False
-                                                          True  -> explExists sb ety
-  explMembers   (sa,sb) = explMembers sa >>= U.filterM (explExists sb)
-  explGetUnsafe (sa,sb) ety = (,) <$> explGetUnsafe sa ety <*> explGetUnsafe sb ety
-  explSetMaybe  (sa,sb) ety (wa,wb) = explSetMaybe sa ety wa >> explSetMaybe sb ety wb
-  {-# INLINE explGetUnsafe #-}
-  {-# INLINE explGet #-}
-  {-# INLINE explSet #-}
-  {-# INLINE explSetMaybe #-}
-  {-# INLINE explMembers #-}
-  {-# INLINE explReset #-}
-  {-# INLINE explDestroy #-}
-  {-# INLINE explExists #-}
-
+T.makeInstances [2..6]
 instance (GlobalStore a, GlobalStore b) => GlobalStore (a,b) where
 {-instance (GlobalStore a, GlobalStore b, GlobalStore c) => GlobalStore (a,b,c) where-}

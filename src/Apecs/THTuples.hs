@@ -13,11 +13,11 @@ makeInstances is = concat <$> traverse tupleInstances is
 instance (Component a, Component b) => Component (a,b) where
   type Storage (a,b) = (Storage a, Storage b)
 
-instance (Has w a, Has w b) => Has w (a,b) where
+instance (Has w m a, Has w m b) => Has w m (a,b) where
   {-# INLINE getStore #-}
   getStore = (,) <$> getStore <*> getStore
 
-instance (Store a, Store b) => Store (a,b) where
+instance (Store m a, Store m b) => Store m (a,b) where
   type Stores (a, b) = (Stores a, Stores b)
   type SafeRW (a, b) = (SafeRW a, SafeRW b)
   initStore = (,) <$> initStore <*> initStore
@@ -43,17 +43,25 @@ instance (Store a, Store b) => Store (a,b) where
 tupleInstances :: Int -> Q [Dec]
 tupleInstances n = do
   let vars = [ VarT . mkName $ "t_" ++ show i | i <- [0..n-1]]
+      --['c1, 'c2, ..] -> '(c1,c2, ..)
       tupleUpT :: [Type] -> Type
       tupleUpT = foldl AppT (TupleT n)
+
+      -- (c1, c2, ...)
       varTuple :: Type
       varTuple = tupleUpT vars
+
+      -- (,,..)
       tupleName :: Name
       tupleName = tupleDataName n
       tuplE :: Exp
       tuplE = ConE tupleName
 
+      compN :: Name
       compN = mkName "Component"
+      compT :: Type -> Type
       compT var = ConT compN `AppT` var
+
       strgN = mkName "Storage"
       strgT var = ConT strgN `AppT` var
       compI = InstanceD Nothing (fmap compT vars) (compT varTuple)
@@ -61,18 +69,22 @@ tupleInstances n = do
           TySynEqn [varTuple] (tupleUpT . fmap strgT $ vars)
         ]
 
+      monadN = mkName "m"
+      monadT = VarT monadN
+
       hasN = mkName "Has"
-      hasT var = ConT hasN `AppT` VarT (mkName "w") `AppT` var
+      hasT var = ConT hasN `AppT` VarT (mkName "w") `AppT` monadT `AppT` var
       getStoreN = mkName "getStore"
       getStoreE = VarE getStoreN
       apN = mkName "<*>"
       apE = VarE apN
       hasI = InstanceD Nothing (hasT <$> vars) (hasT varTuple)
         [ FunD getStoreN
-          [Clause [] (NormalB$ liftAll tuplE (replicate n $ getStoreE )) [] ]
+          [Clause [] (NormalB$ liftAll tuplE (replicate n getStoreE)) [] ]
         , PragmaD$ InlineP getStoreN Inline FunLike AllPhases
         ]
 
+      liftAll :: Exp -> [Exp] -> Exp
       liftAll f mas = foldl (\a x -> AppE (AppE apE a) x) (AppE (VarE (mkName "pure")) f) mas
       sequenceAll :: [Exp] -> Exp
       sequenceAll = foldl1 (\a x -> AppE (AppE (VarE$ mkName ">>") a) x)
@@ -81,7 +93,7 @@ tupleInstances n = do
       strsN = mkName "Stores"
       safeN = mkName "SafeRW"
 
-      strT  var = ConT strN  `AppT` var
+      strT  var = ConT strN  `AppT` monadT `AppT` var
       strsT var = ConT strsN `AppT` var
       safeT var = ConT safeN `AppT` var
 
