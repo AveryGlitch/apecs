@@ -195,19 +195,18 @@ wmap' f = do
       explSetMaybe sw e (getSafe . f . Safe $ r)
 
 -- | Reads a global value
-{-# INLINE readGlobal #-}
-readGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => SystemT w m c
-readGlobal = do s :: Storage c <- getStore
-                lift$ explGet s 0
+{-# INLINE getGlobal #-}
+getGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => SystemT w m c
+getGlobal = do s :: Storage c <- getStore
+               lift$ explGet s 0
 
 -- | Writes a global value
-{-# INLINE writeGlobal #-}
-writeGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => c -> SystemT w m ()
-writeGlobal c = do s :: Storage c <- getStore
-                   lift$ explSet s 0 c
+{-# INLINE setGlobal #-}
+setGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => c -> SystemT w m ()
+setGlobal c = do s :: Storage c <- getStore
+                 lift$ explSet s 0 c
 
 -- | Modifies a global value
 {-# INLINE modifyGlobal #-}
 modifyGlobal :: forall w m c. (Has w m c, GlobalStore (Storage c)) => (c -> c) -> SystemT w m ()
-modifyGlobal f = readGlobal >>= writeGlobal . f
-
+modifyGlobal f = getGlobal >>= setGlobal . f
