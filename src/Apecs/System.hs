@@ -57,9 +57,9 @@ get (Entity ety) = do s :: Storage c <- getStore
 
 -- | Same as @get@, but does not return a safe value and therefore errors if the target component is not present.
 {-# INLINE getUnsafe #-}
-getUnsafe :: forall w c. Has w c => Entity c -> System w c
+getUnsafe :: forall w m c. Has w m c => Entity c -> SystemT w m c
 getUnsafe (Entity ety) = do s :: Storage c <- getStore
-                            liftIO$ explGetUnsafe s ety
+                            lift$ explGetUnsafe s ety
 
 -- | Writes a component to a given entity. Will overwrite existing components.
 --   The type was originally 'Entity c -> c -> System w ()', but is relaxed to 'Entity e'
