@@ -1,7 +1,5 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
@@ -132,12 +130,12 @@ class Monad m => Store m s where
 class (SafeRW s ~ Stores s) => GlobalStore s where
 
 -- | Casts for entities and slices
-class Cast a b where
-  cast :: a -> b
-instance Cast (Entity a) (Entity b) where
+class Cast m where cast :: forall a. m a -> forall b. m b
+
+instance Cast Entity where
   {-# INLINE cast #-}
   cast (Entity ety) = Entity ety
-instance Cast (Slice a) (Slice b) where
+instance Cast Slice where
   {-# INLINE cast #-}
   cast (Slice vec) = Slice vec
 

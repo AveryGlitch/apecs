@@ -1,10 +1,15 @@
-{-# LANGUAGE Strict, ScopedTypeVariables, TypeFamilies #-}
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE Strict                     #-}
+{-# LANGUAGE TypeFamilies               #-}
 
 module Apecs.Util (
   -- * Utility
   initStore, runGC,
+  proxy,
 
   -- * EntityCounter
   EntityCounter, nextEntity, newEntity,
@@ -21,15 +26,19 @@ module Apecs.Util (
 
   ) where
 
-import System.Mem (performMajorGC)
-import Control.Monad.Reader (liftIO)
-import Control.Applicative (liftA2)
-import System.CPUTime
-import Data.Monoid
+import           Control.Applicative  (liftA2)
+import           Control.Monad.Reader (liftIO)
+import           Data.Monoid
+import           System.CPUTime
+import           System.Mem           (performMajorGC)
 
-import Apecs.Types
-import Apecs.Stores
-import Apecs.System
+import           Apecs.Stores
+import           Apecs.System
+import           Apecs.Types
+
+-- | A proxy entity for TODO
+proxy :: Entity c
+proxy = Entity (-1)
 
 -- | Secretly just an int in a newtype
 newtype EntityCounter = EntityCounter {getCounter :: Sum Int} deriving (Monoid, Num, Eq, Show)

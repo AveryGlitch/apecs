@@ -3,5 +3,3 @@ System is now a monad transformer, so it can lift effects into monads other than
 This is useful if e.g. your graphics package runs in a monad, and you'd like to embed `System` into it.
 
 Stores have instances per monad, which allows you to e.g. define instances for `STM`.
-
-The problem with this branch is that performance is about 10x worse.

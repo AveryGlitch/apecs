@@ -1,22 +1,25 @@
-{-# LANGUAGE MultiParamTypeClasses, TypeOperators #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
 
 module Main where
 
-import Control.Monad as M
+import           Control.Monad as M
+import           Data.Proxy
+import           SDL           (($=))
 import qualified SDL
-import SDL (($=))
-import System.Random
-import Data.Proxy
-import SDL.Vect
+import           SDL.Vect
+import           System.Random
 
-import Apecs
-import qualified Apecs.Slice as S
+import           Apecs
+import qualified Apecs.Slice   as S
 
 hres, vres :: Num a => a
 hres = 1024
@@ -72,7 +75,7 @@ render renderer = do
   liftIO$ SDL.clear renderer
 
   cimapM_ $ \(e, Position p) -> do
-    e <- exists (cast e :: Entity Selected)
+    e <- exists (cast e @Selected)
     liftIO$ SDL.rendererDrawColor renderer $= if e then V4 255 255 255 255 else V4 255 0 0 255
     SDL.drawPoint renderer (P (round <$> p))
 
@@ -98,7 +101,7 @@ step = do
   case m of
     Rest -> return ()
     Dragging (V2 ax ay) (V2 bx by) -> do
-      resetStore (Proxy :: Proxy Selected)
+      resetStore (Proxy @Selected)
       let f :: Position -> Safe Selected
           f (Position (V2 x y)) = Safe (x >= min ax bx && x <= max ax bx && y >= min ay by && y <= max ay by)
       rmap' f
@@ -118,7 +121,7 @@ handleEvents = do
     handleEvent (SDL.MouseMotionEvent (SDL.MouseMotionEventData _ _ _ (P p) _)) = do
       md <- getGlobal
       case md of
-        Rest -> return ()
+        Rest         -> return ()
         Dragging a _ -> setGlobal (Dragging a (fromIntegral <$> p))
 
     handleEvent (SDL.MouseButtonEvent (SDL.MouseButtonEventData _ SDL.Pressed _ SDL.ButtonRight _ (P (V2 px py)))) = do
