@@ -23,7 +23,7 @@ runWith = flip runSystem
 
 -- | A slice containing all entities with component @c@
 {-# INLINE owners #-}
-owners :: forall w m c. Has w m c => SystemT w m (Slice c)
+owners :: forall c w m. Has w m c => SystemT w m (Slice c)
 owners = do s :: Storage c <- getStore
             lift$ Slice <$> explMembers s
 
